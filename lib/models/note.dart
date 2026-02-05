@@ -43,12 +43,12 @@ class Note extends HiveObject {
 
   // 获取格式化的创建时间
   String get formattedCreatedAt {
-    return DateFormat('yyyy-MM-dd HH:mm').format(createdAt);
+    return DateFormat('yyyy-MM-dd HH:mm:ss').format(createdAt);
   }
 
   // 获取格式化的更新时间
   String get formattedUpdatedAt {
-    return DateFormat('yyyy-MM-dd HH:mm').format(updatedAt);
+    return DateFormat('yyyy-MM-dd HH:mm:ss').format(updatedAt);
   }
 
   // 复制方法，用于更新笔记

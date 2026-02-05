@@ -1,12 +1,12 @@
-
 import 'package:flutter/material.dart';
-import 'dart:async';
-import 'dart:io';
-import 'package:uuid/uuid.dart';
-import 'package:image_picker/image_picker.dart';
-import 'package:path_provider/path_provider.dart';
 import '../../models/note.dart';
 import '../../services/hive_service.dart';
+import 'dart:convert';
+import 'dart:io' as io show Directory, File;
+import 'package:flutter/foundation.dart';
+import 'package:flutter_quill/flutter_quill.dart';
+import 'package:flutter_quill_extensions/flutter_quill_extensions.dart';
+import 'package:path/path.dart' as path;
 
 class EditScreen extends StatefulWidget {
   final Note? note;
@@ -14,573 +14,462 @@ class EditScreen extends StatefulWidget {
   const EditScreen({Key? key, this.note}) : super(key: key);
 
   @override
-  _EditScreenState createState() => _EditScreenState();
+  State<EditScreen> createState() => _EditScreenState();
 }
 
 class _EditScreenState extends State<EditScreen> {
-  TextEditingController _titleController = TextEditingController();
-  TextEditingController _contentController = TextEditingController();
-  String _category = '未分类';
-  Timer? _autoSaveTimer;
+  late final QuillController _controller;
+  final FocusNode _editorFocusNode = FocusNode();
+  final ScrollController _editorScrollController = ScrollController();
+  final TextEditingController _titleController = TextEditingController();
+  final FocusNode _titleFocusNode = FocusNode();
+  List<String> _categories = [];
   bool _isSaving = false;
-  bool _isDirty = false;
-  List<String> _imagePaths = [];
-  bool _isEditMode = true; // true: 编辑模式, false: 渲染模式
-  int _cursorPosition = 0; // 记录编辑模式下的光标位置
-  ScrollController _scrollController = ScrollController(); // 预览页面的滚动控制器
 
   @override
   void initState() {
     super.initState();
-    // 根据是否是新建笔记设置默认模式
-    _isEditMode = widget.note == null; // 新建笔记时进入编辑模式，编辑现有笔记时进入渲染模式
-    _initializeEditor();
-    _startAutoSaveTimer();
-  }
+    // 初始化标题控制器
+    _titleController.text = widget.note?.title ?? '新笔记';
 
-  @override
-  void dispose() {
-    _autoSaveTimer?.cancel();
-    _titleController.dispose();
-    _contentController.dispose();
-    _scrollController.dispose();
-    super.dispose();
-  }
+    // 加载分类列表
+    _loadCategories();
 
-  // 初始化编辑器
-  void _initializeEditor() {
-    if (widget.note != null) {
-      // 加载现有笔记
-      _titleController.text = widget.note!.title;
-      _contentController.text = widget.note!.content;
-      _category = widget.note!.category;
-      if (widget.note!.imagePaths != null) {
-        _imagePaths = widget.note!.imagePaths!;
+    // 初始化空文档，确保无任何格式，避免工具栏默认选中状态
+    const emptyDocument = [
+      {"insert": "\n"},
+    ];
+    final defaultDocument = Document.fromJson(emptyDocument);
+
+    // 初始化 QuillController
+    _controller = QuillController(
+      document: defaultDocument,
+      selection: const TextSelection.collapsed(offset: 0),
+      config: QuillControllerConfig(
+        clipboardConfig: QuillClipboardConfig(
+          enableExternalRichPaste: true,
+          onImagePaste: (imageBytes) async {
+            if (kIsWeb) {
+              return null;
+            }
+            // 保存图片并返回路径
+            final newFileName =
+                'image-file-${DateTime.now().toIso8601String()}.png';
+            final newPath = path.join(
+              io.Directory.systemTemp.path,
+              newFileName,
+            );
+            final file = await io.File(
+              newPath,
+            ).writeAsBytes(imageBytes, flush: true);
+            return file.path;
+          },
+        ),
+      ),
+    );
+
+    // 加载文档内容
+    if (widget.note?.content != null) {
+      try {
+        final contentJson = jsonDecode(widget.note!.content!);
+        final loadedDocument = Document.fromJson(contentJson);
+        // 确保文档不为空
+        if (loadedDocument.isEmpty()) {
+          // 如果文档为空，使用空文档
+          _controller.document = defaultDocument;
+        } else {
+          _controller.document = loadedDocument;
+        }
+      } catch (e) {
+        // 保持空文档
       }
-    } else {
-      // 检查是否有草稿
-      _loadDraft();
     }
-  }
 
-  // 加载草稿
-  void _loadDraft() {
-    final draft = HiveService.getDraft('new_note');
-    if (draft != null) {
-      _titleController.text = draft['title'] ?? '';
-      _contentController.text = draft['content'] ?? '';
-    }
-  }
-
-  // 启动自动保存计时器
-  void _startAutoSaveTimer() {
-    _autoSaveTimer = Timer.periodic(Duration(seconds: 3), (_) {
-      if (_isDirty) {
-        _autoSaveDraft();
-      }
-    });
-  }
-
-  // 自动保存草稿
-  void _autoSaveDraft() {
-    setState(() {
-      _isSaving = true;
-    });
-
-    try {
-      final content = _contentController.text;
-      HiveService.saveDraft('new_note', _titleController.text, content);
-      _isDirty = false;
-    } catch (e) {
-      print('保存草稿失败: $e');
-    } finally {
-      setState(() {
-        _isSaving = false;
+    // 监听文档变化，确保文档始终不为空
+    _controller.document.changes.listen((event) {
+      // 延迟处理，确保在用户删除操作完成后再检查
+      Future.delayed(const Duration(milliseconds: 10), () {
+        if (_controller.document.isEmpty()) {
+          // 如果文档变为空，添加一个空行
+          _controller.document.insert(0, '\n');
+          // 更新选择到正确位置
+          _controller.updateSelection(
+            const TextSelection.collapsed(offset: 0),
+            ChangeSource.local,
+          );
+        }
       });
-    }
+    });
   }
 
-  // 手动保存正式数据
-  Future<void> _saveNote() async {
+  // 加载分类列表
+  void _loadCategories() {
     setState(() {
-      _isSaving = true;
+      _categories = HiveService.getAllCategories();
+      // 确保至少有一个默认分类
+      if (_categories.isEmpty) {
+        _categories = ['未分类'];
+      }
     });
+  }
+
+  // 格式化日期时间
+  String _formatDateTime(DateTime dateTime) {
+    final year = dateTime.year;
+    final month = dateTime.month.toString().padLeft(2, '0');
+    final day = dateTime.day.toString().padLeft(2, '0');
+    final hour = dateTime.hour.toString().padLeft(2, '0');
+    final minute = dateTime.minute.toString().padLeft(2, '0');
+    final second = dateTime.second.toString().padLeft(2, '0');
+    return '$year-$month-$day $hour:$minute:$second';
+  }
+
+  // 从内容中提取图片路径
+  List<String> _extractImagePaths(String content) {
+    final imagePaths = <String>[];
+    try {
+      final contentJson = jsonDecode(content);
+      if (contentJson is List) {
+        for (final item in contentJson) {
+          if (item is Map && item.containsKey('insert')) {
+            final insert = item['insert'];
+            if (insert is Map && insert.containsKey('image')) {
+              final imagePath = insert['image'];
+              if (imagePath is String) {
+                imagePaths.add(imagePath);
+              }
+            }
+          }
+        }
+      }
+    } catch (e) {
+      print('提取图片路径失败: $e');
+    }
+    return imagePaths;
+  }
+
+  void _saveNote() async {
+    final content = jsonEncode(_controller.document.toDelta().toJson());
+    final title = _titleController.text.trim();
+    final imagePaths = _extractImagePaths(content);
 
     try {
-      final content = _contentController.text;
-      final now = DateTime.now();
+      // 设置保存状态，防止用户在保存过程中点击返回按钮
+      setState(() {
+        _isSaving = true;
+      });
 
       if (widget.note != null) {
-        // 更新现有笔记
-        widget.note!.title = _titleController.text;
+        // 更新现有笔记 - 直接修改原始对象属性
+        widget.note!.title = title.isEmpty ? '无标题' : title;
         widget.note!.content = content;
-        widget.note!.updatedAt = now;
-        widget.note!.category = _category;
-        widget.note!.imagePaths = _imagePaths;
+        widget.note!.imagePaths = imagePaths;
+        widget.note!.updatedAt = DateTime.now();
         await HiveService.updateNote(widget.note!);
+        // 显示更新成功提示
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('笔记更新成功')));
       } else {
         // 创建新笔记
-        final note = Note(
-          id: Uuid().v4(),
-          title: _titleController.text,
+        final newNote = Note(
+          id: 'note_${DateTime.now().millisecondsSinceEpoch}',
+          title: title.isEmpty ? '新笔记' : title,
           content: content,
-          createdAt: now,
-          updatedAt: now,
-          category: _category,
+          createdAt: DateTime.now(),
+          updatedAt: DateTime.now(),
+          category: '未分类',
           isPinned: false,
-          imagePaths: _imagePaths,
+          imagePaths: imagePaths,
         );
-        await HiveService.addNote(note);
-        // 清除草稿
-        HiveService.deleteDraft('new_note');
+        await HiveService.addNote(newNote);
+        // 显示创建成功提示
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('笔记创建成功')));
       }
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('保存成功')),
-      );
-      Navigator.pop(context, true);
+      // 修复保存后黑屏问题
+      // 延迟导航，确保SnackBar完全显示且UI操作完成
+      Future.delayed(const Duration(milliseconds: 1500), () {
+        Navigator.of(context).pop(true);
+      });
     } catch (e) {
-      print('保存笔记失败: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('保存失败')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('保存失败: $e')));
     } finally {
+      // 保存完成后，恢复可返回状态
       setState(() {
         _isSaving = false;
       });
     }
   }
 
-  // 导航到分类选择
-  Future<void> _selectCategory() async {
-    final categories = HiveService.getAllCategories();
-    final result = await showDialog<String>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: Text('选择分类'),
-          content: Container(
-            width: double.maxFinite,
-            child: ListView.builder(
-              shrinkWrap: true,
-              itemCount: categories.length,
-              itemBuilder: (context, index) {
-                final category = categories[index];
-                return ListTile(
-                  title: Text(category),
-                  trailing: _category == category ? Icon(Icons.check) : null,
-                  onTap: () => Navigator.pop(context, category),
-                );
-              },
-            ),
-          ),
-        );
-      },
-    );
-
-    if (result != null) {
-      setState(() {
-        _category = result;
-        _isDirty = true;
-      });
-    }
-  }
-
-  // 处理内容变化
-  void _onContentChanged() {
-    setState(() {
-      _isDirty = true;
-    });
-  }
-
-  // 选择并插入图片
-  Future<void> _pickImage() async {
-    final picker = ImagePicker();
-    final pickedFile = await picker.pickImage(source: ImageSource.gallery);
-
-    if (pickedFile != null) {
-      // 复制图片到应用的本地存储目录
-      final imagePath = await _copyImageToLocal(pickedFile.path);
-      
-      // 获取当前光标位置
-      final cursorPosition = _contentController.selection.baseOffset;
-      // 获取当前文本
-      final currentText = _contentController.text;
-      // 构建新文本，在光标位置插入图片标记
-      final imageTag = ' [图片${_imagePaths.length + 1}] ';
-      final newText = currentText.substring(0, cursorPosition) +
-          imageTag +
-          currentText.substring(cursorPosition);
-      // 更新文本控制器
-      _contentController.text = newText;
-      // 将光标移动到图片插入位置之后
-      _contentController.selection = TextSelection.fromPosition(
-        TextPosition(offset: cursorPosition + imageTag.length),
-      );
-      // 添加到图片路径列表
-      setState(() {
-        _imagePaths.add(imagePath);
-      });
-      // 标记为 dirty
-      _isDirty = true;
-    }
-  }
-
-  // 复制图片到应用的本地存储目录
-  Future<String> _copyImageToLocal(String originalPath) async {
+  // 分享笔记
+  void _shareNote(String format) {
     try {
-      // 获取应用的文档目录
-      final directory = await getApplicationDocumentsDirectory();
-      final imagesDir = Directory('${directory.path}/images');
-      
-      // 创建目录（如果不存在）
-      if (!imagesDir.existsSync()) {
-        imagesDir.createSync(recursive: true);
+      final title = _titleController.text.trim();
+      final content = _controller.document.toPlainText();
+
+      switch (format) {
+        case 'image':
+          // 分享为图片
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('分享为图片功能开发中')),
+          );
+          break;
+        case 'html':
+          // 分享为HTML
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('分享为HTML功能开发中')),
+          );
+          break;
+        case 'pdf':
+          // 分享为PDF
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('分享为PDF功能开发中')),
+          );
+          break;
+        case 'text':
+          // 分享为文本
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('分享为文本功能开发中')),
+          );
+          break;
+        default:
+          break;
       }
-      
-      // 生成唯一的文件名
-      final fileName = '${Uuid().v4()}.jpg';
-      final newPath = '${imagesDir.path}/$fileName';
-      
-      // 复制文件
-      final originalFile = File(originalPath);
-      final newFile = await originalFile.copy(newPath);
-      
-      return newFile.path;
     } catch (e) {
-      print('复制图片失败: $e');
-      return originalPath; // 如果复制失败，返回原始路径
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('分享失败: $e')),
+      );
     }
-  }
-
-  // 构建图文混排的内容
-  Widget _buildMixedContent() {
-    final content = _contentController.text;
-    final widgets = <Widget>[];
-    
-    // 分割文本，识别图片标记
-    final parts = content.split(RegExp(r'\[图片\d+\]'));
-    int imageIndex = 0;
-    
-    for (int i = 0; i < parts.length; i++) {
-      final part = parts[i];
-      
-      // 添加文本部分
-      if (part.isNotEmpty) {
-        widgets.add(
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 2.0),
-            child: Text(part),
-          ),
-        );
-      }
-      
-      // 添加图片部分
-      if (i < parts.length - 1 && imageIndex < _imagePaths.length) {
-        final imagePath = _imagePaths[imageIndex];
-        final file = File(imagePath);
-        
-        if (file.existsSync()) {
-          widgets.add(
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 4.0),
-              child: Image.file(
-                file,
-                fit: BoxFit.cover,
-                width: double.infinity,
-              ),
-            ),
-          );
-        } else {
-          widgets.add(
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 2.0),
-              child: Text(
-                '图片不存在: $imagePath',
-                style: TextStyle(color: Colors.red),
-              ),
-            ),
-          );
-        }
-        
-        imageIndex++;
-      }
-    }
-    
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: widgets,
-    );
-  }
-
-  // 检查是否删除了图片标记
-  void _checkAndRemoveImages() {
-    final content = _contentController.text;
-    final imageTags = RegExp(r'\[图片\d+\]').allMatches(content);
-    final remainingImageCount = imageTags.length;
-    
-    if (remainingImageCount < _imagePaths.length) {
-      // 删除多余的图片路径
-      setState(() {
-        _imagePaths = _imagePaths.take(remainingImageCount).toList();
-      });
-    }
-  }
-
-  // 根据光标位置滚动到对应位置
-  void _scrollToPosition(int cursorPosition) {
-    // 简化处理，根据光标位置估算滚动位置
-    // 实际应用中需要实现更复杂的位置映射
-    final scrollOffset = cursorPosition * 0.1; // 假设每个字符对应一定的滚动偏移
-    _scrollController.animateTo(
-      scrollOffset,
-      duration: Duration(milliseconds: 300),
-      curve: Curves.easeInOut,
-    );
-  }
-
-  // 构建包含图片的内容
-  List<Widget> _buildContentWithImages(String content) {
-    final parts = content.split('\n');
-    final widgets = <Widget>[];
-
-    for (var part in parts) {
-      if (part.startsWith('[图片]')) {
-        // 提取图片路径
-        final imagePath = part.substring('[图片]'.length).trim();
-        final file = File(imagePath);
-        
-        if (file.existsSync()) {
-          // 图片存在，渲染图片
-          widgets.add(
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8.0),
-              child: Image.file(
-                file,
-                fit: BoxFit.cover,
-                width: double.infinity,
-              ),
-            ),
-          );
-        } else {
-          // 图片不存在，显示路径
-          widgets.add(
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 4.0),
-              child: Text(
-                '图片不存在: $imagePath',
-                style: TextStyle(color: Colors.red),
-              ),
-            ),
-          );
-        }
-      } else if (part.isNotEmpty) {
-        // 普通文本
-        widgets.add(
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 4.0),
-            child: Text(
-              part,
-              style: TextStyle(fontSize: 16),
-            ),
-          ),
-        );
-      }
-    }
-
-    return widgets;
   }
 
   @override
   Widget build(BuildContext context) {
+    // 计算总字数
+    final contentText = _controller.document.toPlainText();
+    final wordCount = contentText.length;
+
     return Scaffold(
       appBar: AppBar(
-        title: Text(
-          _isEditMode
-              ? (widget.note != null ? '编辑笔记' : '新建笔记')
-              : '预览笔记',
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          tooltip: '返回',
+          onPressed: () {
+            if (!_isSaving) {
+              Navigator.of(context).pop();
+            }
+          },
+        ),
+        title: Row(
+          children: [
+            // 前进、后退按钮 - 靠左侧
+            IconButton(
+              icon: const Icon(Icons.undo),
+              tooltip: '撤销',
+              onPressed: () {
+                _controller.undo();
+              },
+            ),
+            IconButton(
+              icon: const Icon(Icons.redo),
+              tooltip: '重做',
+              onPressed: () {
+                _controller.redo();
+              },
+            ),
+          ],
         ),
         actions: [
-          if (_isEditMode)
-            IconButton(
-              icon: Icon(Icons.category),
-              onPressed: _selectCategory,
-            ),
+          // 分享按钮
+          PopupMenuButton<String>(
+            onSelected: (format) {
+              _shareNote(format);
+            },
+            itemBuilder: (context) {
+              return [
+                PopupMenuItem(value: 'image', child: Text('分享为图片')),
+                PopupMenuItem(value: 'html', child: Text('分享为HTML')),
+                PopupMenuItem(value: 'pdf', child: Text('分享为PDF')),
+                PopupMenuItem(value: 'text', child: Text('分享为文本')),
+              ];
+            },
+            icon: const Icon(Icons.share),
+            tooltip: '分享笔记',
+          ),
+          // 分组选择操作
+          PopupMenuButton<String>(
+            onSelected: (category) {
+              if (widget.note != null) {
+                widget.note!.category = category;
+              }
+              // 这里可以添加保存分组的逻辑
+            },
+            itemBuilder: (context) => _categories.map((category) {
+              return PopupMenuItem(value: category, child: Text(category));
+            }).toList(),
+            icon: const Icon(Icons.category),
+            tooltip: '选择分组',
+          ),
           IconButton(
-            icon: _isSaving ? CircularProgressIndicator() : Icon(Icons.save),
+            icon: const Icon(Icons.save),
+            tooltip: '保存笔记',
             onPressed: _saveNote,
           ),
         ],
       ),
-      body: Column(
-        children: [
-          // 标题输入（仅编辑模式显示）
-          if (_isEditMode)
+      body: Container(
+        color: Colors.white,
+        child: Column(
+          children: [
+            // 标题和信息行
             Padding(
               padding: const EdgeInsets.all(16.0),
-              child: TextField(
-                controller: _titleController,
-                decoration: InputDecoration(
-                  hintText: '输入标题',
-                  border: OutlineInputBorder(),
-                ),
-                onChanged: (_) => _isDirty = true,
-              ),
-            ),
-
-          // 分类显示（仅编辑模式显示）
-          if (_isEditMode)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-              child: Row(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('分类: '),
-                  Chip(label: Text(_category)),
+                  // 标题输入
+                  TextField(
+                    controller: _titleController,
+                    focusNode: _titleFocusNode,
+                    decoration: const InputDecoration(
+                      border: InputBorder.none,
+                      hintText: '输入标题',
+                      hintStyle: TextStyle(color: Colors.grey),
+                    ),
+                    style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+                    onSubmitted: (_) {
+                      // 提交标题后将焦点移到编辑器
+                      _editorFocusNode.requestFocus();
+                    },
+                  ),
+                  // 时间和字数信息
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8.0),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          '创建: ${widget.note?.formattedCreatedAt ?? _formatDateTime(DateTime.now())}',
+                          style: TextStyle(fontSize: 12, color: Colors.grey),
+                        ),
+                        Text(
+                          '更新: ${widget.note?.formattedUpdatedAt ?? _formatDateTime(DateTime.now())}',
+                          style: TextStyle(fontSize: 12, color: Colors.grey),
+                        ),
+                        Text(
+                          '字数: $wordCount',
+                          style: TextStyle(fontSize: 12, color: Colors.grey),
+                        ),
+                      ],
+                    ),
+                  ),
                 ],
               ),
             ),
-
-          // 页面切换区域
-          Expanded(
-            child:
-              GestureDetector(
-                onHorizontalDragEnd: (details) {
-                  // 左滑切换到渲染模式
-                  if (details.primaryVelocity! < -1000 && _isEditMode) {
-                    // 记录光标位置
-                    _cursorPosition = _contentController.selection.baseOffset;
-                    // 切换到渲染模式
-                    setState(() {
-                      _isEditMode = false;
-                    });
-                    // 延迟滚动，确保 UI 已经更新
-                    Future.delayed(Duration(milliseconds: 100), () {
-                      _scrollToPosition(_cursorPosition);
-                    });
-                  }
-                  // 右滑切换到编辑模式
-                  else if (details.primaryVelocity! > 1000 && !_isEditMode) {
-                    setState(() {
-                      _isEditMode = true;
-                    });
-                  }
-                },
-                child:
-                  Container(
-                    child:
-                      _isEditMode
-                        ?
-                          // 编辑模式
-                          Column(
-                            children:
-                              [
-                                // 工具栏
-                                Padding(
-                                  padding: const EdgeInsets.all(8.0),
-                                  child:
-                                    Row(
-                                      children:
-                                        [
-                                          IconButton(icon: Icon(Icons.format_bold), onPressed: () {}),
-                                          IconButton(icon: Icon(Icons.format_italic), onPressed: () {}),
-                                          IconButton(icon: Icon(Icons.format_list_bulleted), onPressed: () {}),
-                                          IconButton(icon: Icon(Icons.format_list_numbered), onPressed: () {}),
-                                          IconButton(
-                                            icon: Icon(Icons.image),
-                                            onPressed: _pickImage,
-                                            tooltip: '插入图片',
-                                          ),
-                                        ],
-                                    ),
-                                ),
-                                
-                                // 编辑区域
-                                Expanded(
-                                  child:
-                                    Padding(
-                                      padding: const EdgeInsets.all(16.0),
-                                      child:
-                                        Container(
-                                          decoration:
-                                            BoxDecoration(
-                                              border: Border.all(color: Colors.grey[200]!),
-                                              borderRadius: BorderRadius.circular(8),
-                                            ),
-                                          padding: EdgeInsets.all(16),
-                                          child:
-                                            SingleChildScrollView(
-                                              child:
-                                                TextField(
-                                                  controller: _contentController,
-                                                  maxLines: null,
-                                                  decoration:
-                                                    InputDecoration(
-                                                      hintText: '输入内容，插入图片后会显示在对应位置',
-                                                      border: InputBorder.none,
-                                                    ),
-                                                  onChanged: (_) {
-                                                    _isDirty = true;
-                                                    // 检查是否删除了图片标记
-                                                    _checkAndRemoveImages();
-                                                  },
-                                                ),
-                                            ),
-                                        ),
-                                    ),
-                                ),
-                              ],
-                          )
-                        :
-                          // 渲染模式
-                          Padding(
-                            padding: const EdgeInsets.all(16.0),
-                            child:
-                              Container(
-                                decoration:
-                                  BoxDecoration(
-                                    border: Border.all(color: Colors.grey[200]!),
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                padding: EdgeInsets.all(16),
-                                child:
-                                  SingleChildScrollView(
-                                    controller: _scrollController,
-                                    child:
-                                      Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children:
-                                          [
-                                            // 标题
-                                            Text(
-                                              _titleController.text.isNotEmpty ? _titleController.text : '无标题',
-                                              style:
-                                                TextStyle(
-                                                  fontSize: 24,
-                                                  fontWeight: FontWeight.bold,
-                                                ),
-                                            ),
-                                            SizedBox(height: 16),
-                                            
-                                            // 内容
-                                            _buildMixedContent(),
-                                          ],
-                                      ),
-                                  ),
-                              ),
-                          ),
-                  ),
+            // 编辑器配置
+            Expanded(
+              child: QuillEditor(
+                controller: _controller,
+                focusNode: _editorFocusNode,
+                scrollController: _editorScrollController,
+                config: QuillEditorConfig(
+                  placeholder: '开始编写你的笔记...',
+                  padding: const EdgeInsets.all(16),
+                  embedBuilders: FlutterQuillEmbeds.editorBuilders(),
+                ),
               ),
-          ),
-
-          // 自动保存提示
-          if (_isSaving)
-            Container(
-              padding: EdgeInsets.all(8),
-              color: Colors.blue[100],
-              child: Text('正在保存...'),
             ),
-        ],
+            // 工具栏配置 - 移到下方，实现横向滑动
+            Container(
+              decoration: BoxDecoration(
+                border: Border(top: BorderSide(color: Colors.grey.shade200)),
+              ),
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: QuillSimpleToolbar(
+                  controller: _controller,
+                  config: QuillSimpleToolbarConfig(
+                    embedButtons: FlutterQuillEmbeds.toolbarButtons(),
+                    showClipboardPaste: true,
+                    // 移除字体相关选项
+                    showFontFamily: false,
+                    showFontSize: false,
+                    // 显示查找替换功能
+                    showSearchButton: true,
+                    // 将常用文字编辑功能放到二级菜单
+                    customButtons: [
+                      QuillToolbarCustomButtonOptions(
+                        icon: Icon(Icons.format_list_bulleted),
+                        tooltip: '文字编辑',
+                        onPressed: () {
+                          showDialog(
+                            context: context,
+                            builder: (context) {
+                              return AlertDialog(
+                                title: Text('文字编辑'),
+                                content: Container(
+                                  width: 300,
+                                  child: QuillSimpleToolbar(
+                                    controller: _controller,
+                                    config: QuillSimpleToolbarConfig(
+                                      showBoldButton: true,
+                                      showItalicButton: true,
+                                      showUnderLineButton: true,
+                                      showStrikeThrough: true,
+                                      showInlineCode: true,
+                                      showColorButton: true,
+                                      showBackgroundColorButton: true,
+                                      showAlignmentButtons: true,
+                                    ),
+                                  ),
+                                ),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () => Navigator.pop(context),
+                                    child: Text('关闭'),
+                                  ),
+                                ],
+                              );
+                            },
+                          );
+                        },
+                      ),
+                    ],
+                    buttonOptions: QuillSimpleToolbarButtonOptions(
+                      base: QuillToolbarBaseButtonOptions(
+                        afterButtonPressed: () {
+                          final isDesktop = {
+                            TargetPlatform.linux,
+                            TargetPlatform.windows,
+                            TargetPlatform.macOS,
+                          }.contains(defaultTargetPlatform);
+                          if (isDesktop) {
+                            _editorFocusNode.requestFocus();
+                          }
+                        },
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    _editorScrollController.dispose();
+    _editorFocusNode.dispose();
+    _titleController.dispose();
+    _titleFocusNode.dispose();
+    super.dispose();
   }
 }

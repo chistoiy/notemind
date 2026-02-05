@@ -5,7 +5,26 @@ import '../../providers/app_config_provider.dart';
 import '../../services/hive_service.dart';
 import 'data_management_screen.dart';
 
-class SettingsScreen extends StatelessWidget {
+class SettingsScreen extends StatefulWidget {
+  @override
+  _SettingsScreenState createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProviderStateMixin {
+  late TabController _tabController;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 4, vsync: this);
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     final appConfig = context.watch<AppConfigProvider>();
@@ -13,64 +32,109 @@ class SettingsScreen extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(
         title: Text('设置'),
+        bottom: TabBar(
+          controller: _tabController,
+          isScrollable: true,
+          tabs: [
+            Tab(text: '笔记'),
+            Tab(text: '待办事项'),
+            Tab(text: '数据'),
+            Tab(text: '系统'),
+          ],
+        ),
       ),
-      body: ListView(
+      body: TabBarView(
+        controller: _tabController,
         children: [
-          // 主题设置
-          ListTile(
-            title: Text('主题模式'),
-            subtitle: Text(appConfig.isDarkMode ? '暗黑模式' : '浅色模式'),
-            trailing: Switch(
-              value: appConfig.isDarkMode,
-              onChanged: (_) => appConfig.toggleTheme(),
-            ),
+          // 笔记设置
+          ListView(
+            children: [
+              // 主题设置
+              ListTile(
+                title: Text('主题模式'),
+                subtitle: Text(appConfig.isDarkMode ? '暗黑模式' : '浅色模式'),
+                trailing: Switch(
+                  value: appConfig.isDarkMode,
+                  onChanged: (_) => appConfig.toggleTheme(),
+                ),
+              ),
+
+              // 时间轴视图设置
+              ListTile(
+                title: Text('时间轴视图'),
+                subtitle: Text(appConfig.timelineMode ? '已开启' : '已关闭'),
+                trailing: Switch(
+                  value: appConfig.timelineMode,
+                  onChanged: (_) => appConfig.toggleTimelineMode(),
+                ),
+              ),
+
+              // 数据分析页面
+              ListTile(
+                title: Text('数据分析页面'),
+                subtitle: Text(appConfig.analyticsMode ? '已开启' : '已关闭'),
+                trailing: Switch(
+                  value: appConfig.analyticsMode,
+                  onChanged: (_) => appConfig.toggleAnalyticsMode(),
+                ),
+              ),
+            ],
           ),
 
-          // 时间轴视图设置
-          ListTile(
-            title: Text('时间轴视图'),
-            subtitle: Text(appConfig.timelineMode ? '已开启' : '已关闭'),
-            trailing: Switch(
-              value: appConfig.timelineMode,
-              onChanged: (_) => appConfig.toggleTimelineMode(),
-            ),
+          // 待办事项设置
+          ListView(
+            children: [
+              // 待办事项功能
+              ListTile(
+                title: Text('待办事项功能'),
+                subtitle: Text(appConfig.todoMode ? '已开启' : '已关闭'),
+                trailing: Switch(
+                  value: appConfig.todoMode,
+                  onChanged: (_) => appConfig.toggleTodoMode(),
+                ),
+              ),
+            ],
           ),
-
-          Divider(),
-
-          // 清理缓存
-          ListTile(
-            title: Text('清理缓存'),
-            subtitle: Text('清理所有草稿和临时数据'),
-            trailing: Icon(Icons.delete_sweep),
-            onTap: () => _clearCache(context),
-          ),
-
-          Divider(),
 
           // 数据管理
-          ListTile(
-            title: Text('数据管理'),
-            subtitle: Text('导出和导入数据'),
-            trailing: Icon(Icons.arrow_forward),
-            onTap: () => _navigateToDataManagement(context),
+          ListView(
+            children: [
+              // 清理缓存
+              ListTile(
+                title: Text('清理缓存'),
+                subtitle: Text('清理所有草稿和临时数据'),
+                trailing: Icon(Icons.delete_sweep),
+                onTap: () => _clearCache(context),
+              ),
+
+              // 数据导入导出
+              ListTile(
+                title: Text('数据导入导出'),
+                subtitle: Text('导出和导入笔记、配置和分类'),
+                trailing: Icon(Icons.arrow_forward),
+                onTap: () => _navigateToDataManagement(context),
+              ),
+            ],
           ),
 
-          // 日志监控
-          ListTile(
-            title: Text('日志监控'),
-            subtitle: Text('查看应用运行日志'),
-            trailing: Icon(Icons.arrow_forward),
-            onTap: () => _navigateToLogMonitor(context),
-          ),
+          // 系统设置
+          ListView(
+            children: [
+              // 日志监控
+              ListTile(
+                title: Text('日志监控'),
+                subtitle: Text('查看应用运行日志'),
+                trailing: Icon(Icons.arrow_forward),
+                onTap: () => _navigateToLogMonitor(context),
+              ),
 
-          Divider(),
-
-          // 关于应用
-          ListTile(
-            title: Text('关于应用'),
-            trailing: Icon(Icons.info),
-            onTap: () => _showAboutDialog(context),
+              // 关于应用
+              ListTile(
+                title: Text('关于应用'),
+                trailing: Icon(Icons.info),
+                onTap: () => _showAboutDialog(context),
+              ),
+            ],
           ),
         ],
       ),
@@ -155,6 +219,8 @@ class SettingsScreen extends StatelessWidget {
       MaterialPageRoute(builder: (context) => LogMonitorScreen()),
     );
   }
+
+
 }
 
 class LogMonitorScreen extends StatefulWidget {

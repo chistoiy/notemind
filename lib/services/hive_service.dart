@@ -4,12 +4,14 @@ import 'package:hive/hive.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:path_provider/path_provider.dart';
 import '../models/note.dart';
+import '../screens/todo/todo_screen.dart';
 import './log_service.dart';
 
 class HiveService {
   static const String _notesBox = 'notes';
   static const String _categoriesBox = 'categories';
   static const String _draftsBox = 'drafts';
+  static const String _recycledNotesBox = 'recycled_notes';
 
   // 初始化Hive
   static Future<void> initialize() async {
@@ -28,6 +30,16 @@ class HiveService {
       log.debug('注册Note适配器');
       Hive.registerAdapter(NoteAdapter());
       log.debug('Note适配器注册成功');
+      
+      // 注册TodoItem适配器
+      log.debug('注册TodoItem适配器');
+      Hive.registerAdapter(TodoItemAdapter());
+      log.debug('TodoItem适配器注册成功');
+      
+      // 注册DeletedTodoItem适配器
+      log.debug('注册DeletedTodoItem适配器');
+      Hive.registerAdapter(DeletedTodoItemAdapter());
+      log.debug('DeletedTodoItem适配器注册成功');
 
       // 打开所有需要的Box
       log.debug('打开notes Box');
@@ -41,6 +53,10 @@ class HiveService {
       log.debug('打开drafts Box');
       await Hive.openBox<Map>(_draftsBox);
       log.debug('drafts Box打开成功');
+      
+      log.debug('打开recycled_notes Box');
+      await Hive.openBox<Note>(_recycledNotesBox);
+      log.debug('recycled_notes Box打开成功');
 
       // 初始化默认分类
       log.debug('初始化默认分类');
@@ -114,14 +130,86 @@ class HiveService {
     }
   }
 
-  // 删除笔记
-  static Future<void> deleteNote(Note note) async {
+  // 删除笔记到回收站
+  static Future<void> deleteNoteToRecycled(Note note) async {
     try {
-      log.info('删除笔记: ${note.title}');
+      log.info('删除笔记到回收站: ${note.title}');
+      // 先复制note对象
+      final noteCopy = Note(
+        id: note.id,
+        title: note.title,
+        content: note.content,
+        createdAt: note.createdAt,
+        updatedAt: note.updatedAt,
+        category: note.category,
+        isPinned: note.isPinned,
+        imagePaths: note.imagePaths,
+      );
+      // 将复制的笔记添加到回收站
+      final recycledBox = Hive.box<Note>(_recycledNotesBox);
+      await recycledBox.add(noteCopy);
+      // 从原笔记列表中删除
       await note.delete();
-      log.info('笔记删除成功: ${note.id}');
+      log.info('笔记删除到回收站成功: ${note.id}');
     } catch (e, stackTrace) {
-      log.error('删除笔记失败: ${note.title}', e, stackTrace);
+      log.error('删除笔记到回收站失败: ${note.title}', e, stackTrace);
+    }
+  }
+
+  // 兼容旧的删除方法
+  static Future<void> deleteNote(Note note) async {
+    await deleteNoteToRecycled(note);
+  }
+
+  // 获取回收站中的笔记
+  static List<Note> getRecycledNotes() {
+    try {
+      log.debug('获取回收站中的笔记');
+      final recycledBox = Hive.box<Note>(_recycledNotesBox);
+      final notes = recycledBox.values.toList();
+      log.debug('获取到 ${notes.length} 条回收站笔记');
+      return notes;
+    } catch (e, stackTrace) {
+      log.error('获取回收站笔记失败', e, stackTrace);
+      return [];
+    }
+  }
+
+  // 恢复回收站中的笔记
+  static Future<void> restoreNote(Note note) async {
+    try {
+      log.info('恢复笔记: ${note.title}');
+      // 从回收站中删除
+      await note.delete();
+      // 添加到原笔记列表
+      final notesBox = Hive.box<Note>(_notesBox);
+      await notesBox.add(note);
+      log.info('笔记恢复成功: ${note.id}');
+    } catch (e, stackTrace) {
+      log.error('恢复笔记失败: ${note.title}', e, stackTrace);
+    }
+  }
+
+  // 永久删除笔记
+  static Future<void> permanentlyDeleteNote(Note note) async {
+    try {
+      log.info('永久删除笔记: ${note.title}');
+      await note.delete();
+      log.info('笔记永久删除成功: ${note.id}');
+    } catch (e, stackTrace) {
+      log.error('永久删除笔记失败: ${note.title}', e, stackTrace);
+    }
+  }
+
+  // 清空回收站
+  static Future<void> clearRecycledNotes() async {
+    try {
+      log.info('清空回收站');
+      final recycledBox = Hive.box<Note>(_recycledNotesBox);
+      await recycledBox.clear();
+      log.info('回收站清空成功');
+    } catch (e, stackTrace) {
+      log.error('清空回收站失败', e, stackTrace);
     }
   }
 
@@ -173,6 +261,34 @@ class HiveService {
     }
   }
 
+  // 获取所有待办事项
+  static List<TodoItem> getAllTodos() {
+    try {
+      log.debug('获取所有待办事项');
+      final todosBox = Hive.box<TodoItem>('todos');
+      final todos = todosBox.values.toList();
+      log.debug('获取到 ${todos.length} 个待办事项');
+      return todos;
+    } catch (e, stackTrace) {
+      log.error('获取待办事项失败', e, stackTrace);
+      return [];
+    }
+  }
+
+  // 获取所有回收站待办事项
+  static List<DeletedTodoItem> getAllRecycledTodos() {
+    try {
+      log.debug('获取所有回收站待办事项');
+      final recycledTodosBox = Hive.box<DeletedTodoItem>('recycled_todos');
+      final recycledTodos = recycledTodosBox.values.toList();
+      log.debug('获取到 ${recycledTodos.length} 个回收站待办事项');
+      return recycledTodos;
+    } catch (e, stackTrace) {
+      log.error('获取回收站待办事项失败', e, stackTrace);
+      return [];
+    }
+  }
+
   // 添加分类
   static Future<void> addCategory(String category) async {
     try {
@@ -203,6 +319,18 @@ class HiveService {
       }
     } catch (e, stackTrace) {
       log.error('删除分类失败: $category', e, stackTrace);
+    }
+  }
+
+  // 清空所有分类
+  static Future<void> clearCategories() async {
+    try {
+      log.info('清空所有分类');
+      final categoriesBox = Hive.box<String>(_categoriesBox);
+      await categoriesBox.clear();
+      log.info('所有分类清空成功');
+    } catch (e, stackTrace) {
+      log.error('清空所有分类失败', e, stackTrace);
     }
   }
 
@@ -270,6 +398,17 @@ class HiveService {
       log.info('缓存清理成功');
     } catch (e, stackTrace) {
       log.error('缓存清理失败', e, stackTrace);
+    }
+  }
+
+  // 获取笔记Box
+  static Box<Note> getNotesBox() {
+    try {
+      log.debug('获取笔记Box');
+      return Hive.box<Note>(_notesBox);
+    } catch (e, stackTrace) {
+      log.error('获取笔记Box失败', e, stackTrace);
+      throw e;
     }
   }
 

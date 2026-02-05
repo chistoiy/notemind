@@ -6,9 +6,13 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:device_info_plus/device_info_plus.dart';
+import 'package:hive/hive.dart';
 import '../../services/hive_service.dart';
 import '../../models/note.dart';
+import '../../screens/todo/todo_screen.dart';
 import '../../services/log_service.dart';
+import '../../providers/app_config_provider.dart';
+import 'package:provider/provider.dart';
 
 class DataManagementScreen extends StatefulWidget {
   @override
@@ -54,9 +58,7 @@ class _DataManagementScreenState extends State<DataManagementScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: Text('数据管理'),
-      ),
+      appBar: AppBar(title: Text('数据管理')),
       body: ListView(
         children: [
           // 存储位置设置
@@ -95,7 +97,6 @@ class _DataManagementScreenState extends State<DataManagementScreen> {
             trailing: Icon(Icons.import_export),
             onTap: () => _importData(context),
           ),
-
         ],
       ),
     );
@@ -114,7 +115,7 @@ class _DataManagementScreenState extends State<DataManagementScreen> {
     } catch (e) {
       print('获取存储位置失败: $e');
     }
-    
+
     // 默认存储位置
     final directory = await getApplicationDocumentsDirectory();
     return directory.path;
@@ -129,7 +130,7 @@ class _DataManagementScreenState extends State<DataManagementScreen> {
         final androidInfo = await DeviceInfoPlugin().androidInfo;
         final androidVersion = androidInfo.version.sdkInt;
         log.debug('安卓版本: $androidVersion');
-        
+
         if (androidVersion >= 33) {
           // 安卓13及以上，使用新的存储权限
           log.debug('使用新的存储权限模型');
@@ -159,6 +160,9 @@ class _DataManagementScreenState extends State<DataManagementScreen> {
             return true;
           }
         }
+      } else if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+        log.debug('桌面平台不需要存储权限');
+        return true; // 桌面平台不需要存储权限
       }
       log.debug('iOS不需要存储权限');
       return true; // iOS 不需要存储权限
@@ -204,7 +208,9 @@ class _DataManagementScreenState extends State<DataManagementScreen> {
                 ListTile(
                   title: Text('默认存储位置'),
                   subtitle: FutureBuilder<String>(
-                    future: getApplicationDocumentsDirectory().then((dir) => dir.path),
+                    future: getApplicationDocumentsDirectory().then(
+                      (dir) => dir.path,
+                    ),
                     builder: (context, snapshot) {
                       if (snapshot.hasData) {
                         return Text(snapshot.data!);
@@ -259,7 +265,7 @@ class _DataManagementScreenState extends State<DataManagementScreen> {
       if (selectedLocation != null) {
         log.debug('选择的存储位置: $selectedLocation');
         String finalLocation = selectedLocation;
-        
+
         // 如果选择了自定义存储位置，使用 file_picker 让用户选择目录
         if (selectedLocation == 'custom') {
           try {
@@ -274,13 +280,13 @@ class _DataManagementScreenState extends State<DataManagementScreen> {
             }
           } catch (e, stackTrace) {
             log.error('选择目录失败', e, stackTrace);
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('选择目录失败: $e')),
-            );
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(SnackBar(content: Text('选择目录失败: $e')));
             return;
           }
         }
-        
+
         // 保存选择的存储位置
         log.debug('保存选择的存储位置: $finalLocation');
         final prefs = await SharedPreferences.getInstance();
@@ -288,17 +294,17 @@ class _DataManagementScreenState extends State<DataManagementScreen> {
 
         // 显示成功提示
         log.info('存储位置设置成功: $finalLocation');
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('存储位置已设置为: $finalLocation')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('存储位置已设置为: $finalLocation')));
       } else {
         log.debug('用户取消了存储位置选择');
       }
     } catch (e, stackTrace) {
       log.error('选择存储位置失败', e, stackTrace);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('选择存储位置失败: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('选择存储位置失败: $e')));
     }
   }
 
@@ -334,7 +340,7 @@ class _DataManagementScreenState extends State<DataManagementScreen> {
     } catch (e, stackTrace) {
       log.error('获取公共存储位置失败', e, stackTrace);
     }
-    
+
     // 如果获取公共存储位置失败，返回默认存储位置
     log.debug('获取公共存储位置失败，使用默认存储位置');
     final defaultDir = await getApplicationDocumentsDirectory();
@@ -363,44 +369,100 @@ class _DataManagementScreenState extends State<DataManagementScreen> {
         );
         return;
       }
-      
+
       // 获取存储位置
       final storageLocation = await _getStorageLocation();
       log.debug('使用存储位置: $storageLocation');
-      
+
       // 检查并创建存储目录
       final storageDir = Directory(storageLocation);
       if (!storageDir.existsSync()) {
-        storageDir.createSync(recursive: true);
-        log.debug('存储目录创建成功: $storageLocation');
+        try {
+          storageDir.createSync(recursive: true);
+          log.debug('存储目录创建成功: $storageLocation');
+        } catch (e) {
+          log.error('创建存储目录失败: $e');
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text('创建存储目录失败: $e')));
+          return;
+        }
       }
-      
+
       // 获取所有笔记
       final notes = HiveService.getAllNotes();
       log.debug('获取到 ${notes.length} 条笔记');
-      
+
+      // 获取所有待办事项
+      final todos = HiveService.getAllTodos();
+      log.debug('获取到 ${todos.length} 个待办事项');
+
+      // 获取所有回收站待办事项
+      final recycledTodos = HiveService.getAllRecycledTodos();
+      log.debug('获取到 ${recycledTodos.length} 个回收站待办事项');
+
       // 生成导出目录
       final timestamp = DateTime.now().millisecondsSinceEpoch;
-      final exportDir = Directory('$storageLocation/notemind_export_$timestamp');
+      final exportDir = Directory(
+        '$storageLocation/notemind_export_$timestamp',
+      );
       if (!exportDir.existsSync()) {
-        exportDir.createSync(recursive: true);
-        log.debug('导出目录创建成功: ${exportDir.path}');
+        try {
+          exportDir.createSync(recursive: true);
+          log.debug('导出目录创建成功: ${exportDir.path}');
+        } catch (e) {
+          log.error('创建导出目录失败: $e');
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text('创建导出目录失败: $e')));
+          return;
+        }
       } else {
         log.debug('导出目录已存在: ${exportDir.path}');
       }
-      
+
       // 创建images目录
       final imagesDir = Directory('${exportDir.path}/images');
       if (!imagesDir.existsSync()) {
-        imagesDir.createSync(recursive: true);
-        log.debug('图片目录创建成功: ${imagesDir.path}');
+        try {
+          imagesDir.createSync(recursive: true);
+          log.debug('图片目录创建成功: ${imagesDir.path}');
+        } catch (e) {
+          log.error('创建图片目录失败: $e');
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text('创建图片目录失败: $e')));
+          return;
+        }
       } else {
         log.debug('图片目录已存在: ${imagesDir.path}');
       }
-      
+
+      // 获取应用配置
+      final appConfig = Provider.of<AppConfigProvider>(context, listen: false);
+
+      // 获取所有分类
+      final categories = HiveService.getAllCategories();
+
       // 转换为JSON格式，同时导出图片
-      final notesJson = [];
-      
+      final notesList = [];
+      final todosList = [];
+      final recycledTodosList = [];
+      final exportData = {
+        'notes': notesList,
+        'todos': todosList,
+        'recycledTodos': recycledTodosList,
+        'appConfig': {
+          'isDarkMode': appConfig.isDarkMode,
+          'sortBy': appConfig.sortBy,
+          'viewMode': appConfig.viewMode,
+          'timelineMode': appConfig.timelineMode,
+          'todoMode': appConfig.todoMode,
+          'analyticsMode': appConfig.analyticsMode,
+        },
+        'categories': categories,
+      };
+
       for (final note in notes) {
         final noteData = {
           'id': note.id,
@@ -412,54 +474,94 @@ class _DataManagementScreenState extends State<DataManagementScreen> {
           'isPinned': note.isPinned,
           'imagePaths': [],
         };
-        
+
         // 导出图片
         if (note.imagePaths != null) {
-          final exportedImagePaths = [];
-          
+          final List<String> exportedImagePaths = [];
+
           for (int i = 0; i < note.imagePaths!.length; i++) {
             final originalPath = note.imagePaths![i];
             final originalFile = File(originalPath);
-            
+
             if (originalFile.existsSync()) {
-              // 生成新的文件名
-              final fileName = '${note.id}_image_$i.jpg';
-              final newPath = '${imagesDir.path}/$fileName';
-              
-              // 复制图片文件
-              await originalFile.copy(newPath);
-              
-              // 保存相对路径
-              exportedImagePaths.add('images/$fileName');
-              log.debug('图片导出成功: $fileName');
+              try {
+                // 生成新的文件名
+                final fileName = '${note.id}_image_$i.jpg';
+                final newPath = '${imagesDir.path}/$fileName';
+
+                // 复制图片文件
+                await originalFile.copy(newPath);
+
+                // 保存相对路径
+                exportedImagePaths.add('images/$fileName');
+                log.debug('图片导出成功: $fileName');
+              } catch (e) {
+                log.error('导出图片失败: $e');
+                // 继续导出其他图片，不中断整个导出过程
+              }
             }
           }
-          
+
           noteData['imagePaths'] = exportedImagePaths;
         }
-        
-        notesJson.add(noteData);
+
+        notesList.add(noteData);
       }
-      
-      final jsonString = jsonEncode(notesJson);
-      
+
+      // 处理待办事项数据
+      for (final todo in todos) {
+        final todoData = {
+          'title': todo.title,
+          'isCompleted': todo.isCompleted,
+          'createdAt': todo.createdAt.toIso8601String(),
+          'dueDate': todo.dueDate?.toIso8601String(),
+          'isExpired': todo.isExpired,
+        };
+        todosList.add(todoData);
+      }
+
+      // 处理回收站待办事项数据
+      for (final recycledTodo in recycledTodos) {
+        final recycledTodoData = {
+          'todo': {
+            'title': recycledTodo.todo.title,
+            'isCompleted': recycledTodo.todo.isCompleted,
+            'createdAt': recycledTodo.todo.createdAt.toIso8601String(),
+            'dueDate': recycledTodo.todo.dueDate?.toIso8601String(),
+            'isExpired': recycledTodo.todo.isExpired,
+          },
+          'deletedAt': recycledTodo.deletedAt.toIso8601String(),
+        };
+        recycledTodosList.add(recycledTodoData);
+      }
+
+      final jsonString = jsonEncode(exportData);
+
       // 生成JSON文件名
       final filePath = '${exportDir.path}/notes.json';
-      
+
       // 写入文件
-      final file = File(filePath);
-      await file.writeAsString(jsonString);
-      log.info('数据导出成功: $filePath');
-      
-      // 显示成功提示
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('数据导出成功，保存到: ${exportDir.path}')),
-      );
+      try {
+        final file = File(filePath);
+        await file.writeAsString(jsonString);
+        log.info('数据导出成功: $filePath');
+
+        // 显示成功提示
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('数据导出成功，保存到: ${exportDir.path}')),
+        );
+      } catch (e) {
+        log.error('写入导出文件失败: $e');
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('写入导出文件失败: $e')));
+        return;
+      }
     } catch (e, stackTrace) {
       log.error('导出数据失败', e, stackTrace);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('导出数据失败: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('导出数据失败: $e')));
     }
   }
 
@@ -483,76 +585,146 @@ class _DataManagementScreenState extends State<DataManagementScreen> {
         );
         return;
       }
-      
+
       // 使用目录选择器让用户选择要导入的目录
       log.debug('开始选择导入目录');
       final result = await FilePicker.platform.getDirectoryPath(
         dialogTitle: '选择包含笔记数据的目录',
       );
-      
+
       if (result == null) {
         log.debug('用户取消了目录选择');
         return;
       }
-      
+
       // 查找目录中的notes.json文件
       final file = File('$result/notes.json');
       log.debug('查找的文件: ${file.path}');
-      
+
       if (!file.existsSync()) {
         log.error('文件不存在: ${file.path}');
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('文件不存在')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('文件不存在')));
         return;
       }
-      
+
       // 读取文件内容
       log.debug('开始读取文件内容');
       final jsonString = await file.readAsString();
-      final notesJson = jsonDecode(jsonString) as List;
+      final importData = jsonDecode(jsonString) as Map<String, dynamic>;
+      final notesJson = importData['notes'] as List;
       log.debug('读取到 ${notesJson.length} 条笔记');
-      
+
+      // 读取应用配置
+      final appConfigJson = importData['appConfig'] as Map<String, dynamic>?;
+      // 读取分类配置
+      List<String>? categoriesJson;
+      if (importData['categories'] != null) {
+        final dynamic categories = importData['categories'];
+        if (categories is List) {
+          categoriesJson = categories
+              .map((category) => category.toString())
+              .toList();
+        }
+      }
+
+      // 显示导入方式选择对话框
+      final importMode = await showDialog<String>(
+        context: context,
+        builder: (context) {
+          return AlertDialog(
+            title: Text('选择导入方式'),
+            content: Text('请选择如何导入笔记数据:'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, 'incremental'),
+                child: Text('增量导入'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(context, 'clear'),
+                child: Text('清空导入'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(context, 'cancel'),
+                child: Text('取消'),
+              ),
+            ],
+          );
+        },
+      );
+
+      if (importMode == 'cancel' || importMode == null) {
+        log.debug('用户取消了导入操作');
+        return;
+      }
+
+      // 如果选择了清空导入，先清空现有笔记
+      if (importMode == 'clear') {
+        try {
+          log.debug('开始清空现有笔记');
+          // 使用 HiveService 清空现有笔记
+          final notesBox = HiveService.getNotesBox();
+          await notesBox.clear();
+          log.debug('清空现有笔记成功');
+        } catch (e) {
+          log.error('清空现有笔记失败: $e');
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text('清空现有笔记失败: $e')));
+          return;
+        }
+      }
+
       // 导入笔记
       log.debug('开始导入笔记');
       int importedCount = 0;
-      
+
       for (final noteJson in notesJson) {
         List<String>? imagePaths;
-        
+
         // 处理图片路径
         if (noteJson['imagePaths'] != null) {
-          final relativePaths = List<String>.from(noteJson['imagePaths']);
-          imagePaths = [];
-          
-          for (final relativePath in relativePaths) {
-            // 转换为绝对路径
-            final directoryPath = file.parent.path;
-            final absolutePath = '$directoryPath/$relativePath';
-            final imageFile = File(absolutePath);
-            
-            if (imageFile.existsSync()) {
-              // 复制图片到应用的本地存储目录
-              final appDir = await getApplicationDocumentsDirectory();
-              final imagesDir = Directory('${appDir.path}/images');
-              
-              if (!imagesDir.existsSync()) {
-                imagesDir.createSync(recursive: true);
+          final dynamic paths = noteJson['imagePaths'];
+          if (paths is List) {
+            final relativePaths = paths.map((path) => path.toString()).toList();
+            imagePaths = [];
+
+            for (final relativePath in relativePaths) {
+              // 转换为绝对路径
+              final directoryPath = file.parent.path;
+              final absolutePath = '$directoryPath/$relativePath';
+              final imageFile = File(absolutePath);
+
+              if (imageFile.existsSync()) {
+                try {
+                  // 复制图片到应用的本地存储目录
+                  final appDir = await getApplicationDocumentsDirectory();
+                  final imagesDir = Directory('${appDir.path}/images');
+
+                  if (!imagesDir.existsSync()) {
+                    imagesDir.createSync(recursive: true);
+                  }
+
+                  // 生成新的文件名
+                  final fileName = absolutePath.split('/').last;
+                  final newPath = '${imagesDir.path}/$fileName';
+
+                  // 复制图片文件
+                  await imageFile.copy(newPath);
+
+                  // 保存新的路径
+                  imagePaths!.add(newPath);
+                  log.debug('图片导入成功: $fileName');
+                } catch (e) {
+                  log.error('导入图片失败: $e');
+                  // 继续导入其他图片，不中断整个导入过程
+                }
               }
-              
-              // 生成新的文件名
-              final fileName = absolutePath.split('/').last;
-              final newPath = '${imagesDir.path}/$fileName';
-              
-              // 复制图片文件
-              await imageFile.copy(newPath);
-              
-              // 保存新的路径
-              imagePaths!.add(newPath);
             }
           }
         }
-        
+
         final note = Note(
           id: noteJson['id'],
           title: noteJson['title'],
@@ -563,22 +735,173 @@ class _DataManagementScreenState extends State<DataManagementScreen> {
           isPinned: noteJson['isPinned'],
           imagePaths: imagePaths,
         );
-        
-        // 直接添加笔记
-        HiveService.addNote(note);
-        importedCount++;
+
+        // 检查是否已存在相同id的笔记
+        try {
+          final existingNote = HiveService.getNoteById(note.id);
+          if (existingNote != null) {
+            // 更新现有笔记
+            HiveService.updateNote(note);
+            log.debug('更新现有笔记: ${note.title}');
+          } else {
+            // 添加新笔记
+            HiveService.addNote(note);
+            log.debug('添加新笔记: ${note.title}');
+          }
+          importedCount++;
+        } catch (e) {
+          log.error('导入笔记失败: $e');
+          // 继续导入其他笔记，不中断整个导入过程
+        }
       }
-      
+
+      // 导入待办事项
+      log.debug('开始导入待办事项');
+      final todosJson = importData['todos'] as List?;
+      if (todosJson != null) {
+        for (final todoJson in todosJson) {
+          try {
+            final todo = TodoItem(
+              todoJson['title'] as String,
+              todoJson['isCompleted'] as bool,
+            );
+            todo.createdAt = DateTime.parse(todoJson['createdAt'] as String);
+            if (todoJson['dueDate'] != null) {
+              todo.dueDate = DateTime.parse(todoJson['dueDate'] as String);
+            }
+            todo.isExpired = todoJson['isExpired'] as bool;
+
+            final todosBox = Hive.box<TodoItem>('todos');
+            await todosBox.add(todo);
+            log.debug('待办事项导入成功: ${todo.title}');
+          } catch (e) {
+            log.error('导入待办事项失败: $e');
+            // 继续导入其他待办事项，不中断整个导入过程
+          }
+        }
+      }
+
+      // 导入回收站待办事项
+      log.debug('开始导入回收站待办事项');
+      final recycledTodosJson = importData['recycledTodos'] as List?;
+      if (recycledTodosJson != null) {
+        for (final recycledTodoJson in recycledTodosJson) {
+          try {
+            final todoData = recycledTodoJson['todo'] as Map;
+            final todo = TodoItem(
+              todoData['title'] as String,
+              todoData['isCompleted'] as bool,
+            );
+            todo.createdAt = DateTime.parse(todoData['createdAt'] as String);
+            if (todoData['dueDate'] != null) {
+              todo.dueDate = DateTime.parse(todoData['dueDate'] as String);
+            }
+            todo.isExpired = todoData['isExpired'] as bool;
+
+            final deletedTodo = DeletedTodoItem(todo);
+            deletedTodo.deletedAt = DateTime.parse(
+              recycledTodoJson['deletedAt'] as String,
+            );
+
+            final recycledTodosBox = Hive.box<DeletedTodoItem>(
+              'recycled_todos',
+            );
+            await recycledTodosBox.add(deletedTodo);
+            log.debug('回收站待办事项导入成功');
+          } catch (e) {
+            log.error('导入回收站待办事项失败: $e');
+            // 继续导入其他回收站待办事项，不中断整个导入过程
+          }
+        }
+      }
+
+      // 还原应用配置
+      if (appConfigJson != null) {
+        try {
+          final appConfig = Provider.of<AppConfigProvider>(
+            context,
+            listen: false,
+          );
+
+          // 还原主题模式
+          if (appConfigJson.containsKey('isDarkMode')) {
+            final isDarkMode = appConfigJson['isDarkMode'] as bool;
+            if (appConfig.isDarkMode != isDarkMode) {
+              await appConfig.toggleTheme();
+            }
+          }
+
+          // 还原排序方式
+          if (appConfigJson.containsKey('sortBy')) {
+            final sortBy = appConfigJson['sortBy'] as String;
+            await appConfig.setSortBy(sortBy);
+          }
+
+          // 还原视图模式
+          if (appConfigJson.containsKey('viewMode')) {
+            final viewMode = appConfigJson['viewMode'] as String;
+            while (appConfig.viewMode != viewMode) {
+              await appConfig.toggleViewMode();
+            }
+          }
+
+          // 还原时间轴模式
+          if (appConfigJson.containsKey('timelineMode')) {
+            final timelineMode = appConfigJson['timelineMode'] as bool;
+            if (appConfig.timelineMode != timelineMode) {
+              await appConfig.toggleTimelineMode();
+            }
+          }
+
+          // 还原待办事项模式
+          if (appConfigJson.containsKey('todoMode')) {
+            final todoMode = appConfigJson['todoMode'] as bool;
+            if (appConfig.todoMode != todoMode) {
+              await appConfig.toggleTodoMode();
+            }
+          }
+
+          // 还原数据分析模式
+          if (appConfigJson.containsKey('analyticsMode')) {
+            final analyticsMode = appConfigJson['analyticsMode'] as bool;
+            if (appConfig.analyticsMode != analyticsMode) {
+              await appConfig.toggleAnalyticsMode();
+            }
+          }
+
+          log.info('应用配置还原成功');
+        } catch (e) {
+          log.error('还原应用配置失败: $e');
+        }
+      }
+
+      // 还原分类配置
+      if (categoriesJson != null) {
+        try {
+          // 清空现有分类
+          await HiveService.clearCategories();
+
+          // 添加导入的分类
+          for (final category in categoriesJson) {
+            await HiveService.addCategory(category);
+          }
+
+          log.info('分类配置还原成功，共还原 ${categoriesJson.length} 个分类');
+        } catch (e) {
+          log.error('还原分类配置失败: $e');
+        }
+      }
+
       // 显示成功提示
       log.info('数据导入成功，共导入 $importedCount 条笔记');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('数据导入成功，共导入 $importedCount 条笔记')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('数据导入成功，共导入 $importedCount 条笔记')));
     } catch (e, stackTrace) {
       log.error('导入数据失败', e, stackTrace);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('数据导入失败: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('数据导入失败: $e')));
     }
   }
 }

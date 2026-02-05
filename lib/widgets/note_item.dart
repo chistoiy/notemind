@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_slidable/flutter_slidable.dart';
 import 'dart:io';
+import 'dart:convert';
 import '../models/note.dart';
 
 class NoteItem extends StatelessWidget {
@@ -19,6 +20,30 @@ class NoteItem extends StatelessWidget {
     required this.onDelete,
     required this.onPin,
   }) : super(key: key);
+
+  // 从Flutter Quill的JSON格式中提取纯文本
+  String _extractPlainText(String jsonContent) {
+    try {
+      final List<dynamic> content = jsonDecode(jsonContent);
+      String plainText = '';
+      
+      for (final item in content) {
+        if (item is Map && item.containsKey('insert')) {
+          final insertValue = item['insert'];
+          if (insertValue is String) {
+            plainText += insertValue;
+          }
+        }
+      }
+      
+      // 移除多余的空白字符
+      plainText = plainText.trim();
+      return plainText.isEmpty ? '无内容' : plainText;
+    } catch (e) {
+      // 如果解析失败，返回原始内容
+      return jsonContent;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -86,7 +111,7 @@ class NoteItem extends StatelessWidget {
                     [
                       // 文本内容
                       Text(
-                        note.content,
+                        _extractPlainText(note.content),
                         style:
                           TextStyle(
                             fontSize: 14,
@@ -141,18 +166,27 @@ class NoteItem extends StatelessWidget {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text(
-                      note.category,
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.grey[500],
+                    Expanded(
+                      child: Text(
+                        note.category,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey[500],
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: 1,
                       ),
                     ),
-                    Text(
-                      note.formattedUpdatedAt,
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.grey[500],
+                    Expanded(
+                      child: Text(
+                        note.formattedUpdatedAt,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey[500],
+                        ),
+                        textAlign: TextAlign.right,
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: 1,
                       ),
                     ),
                   ],

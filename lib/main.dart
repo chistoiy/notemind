@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:flutter_quill/flutter_quill.dart';
 import 'package:provider/provider.dart';
 import 'screens/home/home_screen.dart';
 import 'providers/app_config_provider.dart';
@@ -35,14 +37,19 @@ void main() async {
 class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    final appConfig = context.watch<AppConfigProvider>();
-
+    final appConfig = Provider.of<AppConfigProvider>(context);
     return MaterialApp(
       title: 'Notemind',
       theme: appConfig.themeData,
       home: HomeScreen(),
       debugShowCheckedModeBanner: false,
+      localizationsDelegates: [
+        GlobalMaterialLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        FlutterQuillLocalizations.delegate,
+      ],
+      supportedLocales: const [Locale('en'), Locale('zh')],
     );
   }
 }
-

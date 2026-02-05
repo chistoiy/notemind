@@ -10,6 +10,7 @@ class CategoryScreen extends StatefulWidget {
 
 class _CategoryScreenState extends State<CategoryScreen> {
   List<String> _categories = [];
+  List<String> _selectedCategories = [];
   TextEditingController _categoryController = TextEditingController();
   bool _isLoading = true;
 
@@ -100,8 +101,14 @@ class _CategoryScreenState extends State<CategoryScreen> {
         title: Text('分类管理'),
         leading: IconButton(
           icon: Icon(Icons.arrow_back),
-          onPressed: () => Navigator.pop(context),
+          onPressed: () => Navigator.pop(context, _selectedCategories),
         ),
+        actions: [
+          IconButton(
+            icon: Icon(Icons.check),
+            onPressed: () => Navigator.pop(context, _selectedCategories),
+          ),
+        ],
       ),
       body: Column(
         children: [
@@ -142,22 +149,34 @@ class _CategoryScreenState extends State<CategoryScreen> {
                       return Card(
                         elevation: 2,
                         child: ListTile(
+                          leading: Checkbox(
+                            value: _selectedCategories.contains(category),
+                            onChanged: (value) {
+                              setState(() {
+                                if (value == true) {
+                                  _selectedCategories.add(category);
+                                } else {
+                                  _selectedCategories.remove(category);
+                                }
+                              });
+                            },
+                          ),
                           title: Text(category),
-                          trailing: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              IconButton(
-                                icon: Icon(Icons.check_circle),
-                                onPressed: () => _selectCategory(category),
-                              ),
-                              if (category != '未分类')
-                                IconButton(
+                          trailing: category != '未分类'
+                              ? IconButton(
                                   icon: Icon(Icons.delete, color: Colors.red),
                                   onPressed: () => _deleteCategory(category),
-                                ),
-                            ],
-                          ),
-                          onTap: () => _selectCategory(category),
+                                )
+                              : null,
+                          onTap: () {
+                            setState(() {
+                              if (_selectedCategories.contains(category)) {
+                                _selectedCategories.remove(category);
+                              } else {
+                                _selectedCategories.add(category);
+                              }
+                            });
+                          },
                         ),
                       );
                     },
