@@ -1,7 +1,5 @@
-
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:pull_to_refresh/pull_to_refresh.dart';
 import '../../providers/app_config_provider.dart';
 import '../../services/hive_service.dart';
 import '../../models/note.dart';
@@ -27,7 +25,6 @@ class _HomeScreenState extends State<HomeScreen> {
   String _selectedCategory = '全部';
   List<String> _categories = [];
   List<String> _selectedCategories = [];
-  RefreshController _refreshController = RefreshController(initialRefresh: false);
   bool _isTimelineMode = false; // true: 时间轴模式, false: 普通模式
   String _timelineSortBy = 'updatedAt'; // 'createdAt' 或 'updatedAt'
   int _currentIndex = 0; // 0: 主页, 1: 待办事项
@@ -40,7 +37,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
-    _refreshController.dispose();
     super.dispose();
   }
 
@@ -75,12 +71,12 @@ class _HomeScreenState extends State<HomeScreen> {
   // 排序笔记
   void _sortNotes(List<Note> notes) {
     final sortBy = context.read<AppConfigProvider>().sortBy;
-    
+
     notes.sort((a, b) {
       // 置顶笔记优先
       if (a.isPinned && !b.isPinned) return -1;
       if (!a.isPinned && b.isPinned) return 1;
-      
+
       // 然后按排序方式
       if (sortBy == 'date') {
         return b.updatedAt.compareTo(a.updatedAt);
@@ -93,9 +89,12 @@ class _HomeScreenState extends State<HomeScreen> {
   // 筛选笔记
   void _filterNotes() {
     _filteredNotes = _notes.where((note) {
-      final matchesSearch = note.title.toLowerCase().contains(_searchQuery.toLowerCase()) ||
+      final matchesSearch =
+          note.title.toLowerCase().contains(_searchQuery.toLowerCase()) ||
           note.content.toLowerCase().contains(_searchQuery.toLowerCase());
-      final matchesCategory = _selectedCategories.isEmpty || _selectedCategories.contains(note.category);
+      final matchesCategory =
+          _selectedCategories.isEmpty ||
+          _selectedCategories.contains(note.category);
       return matchesSearch && matchesCategory;
     }).toList();
     // 时间轴模式下需要根据时间排序
@@ -115,16 +114,10 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
-  // 下拉刷新
-  void _onRefresh() async {
-    await _loadNotes();
-    _refreshController.refreshCompleted();
-  }
-
   // 导航到编辑页面
   void _navigateToEdit([Note? note]) async {
     final result = await Navigator.push(
-      context, 
+      context,
       MaterialPageRoute(builder: (context) => EditScreen(note: note)),
     );
     if (result == true) {
@@ -135,7 +128,7 @@ class _HomeScreenState extends State<HomeScreen> {
   // 导航到详情页面（直接进入编辑页面的预览模式）
   void _navigateToDetail(Note note) async {
     final result = await Navigator.push(
-      context, 
+      context,
       MaterialPageRoute(builder: (context) => EditScreen(note: note)),
     );
     if (result == true) {
@@ -146,7 +139,7 @@ class _HomeScreenState extends State<HomeScreen> {
   // 导航到分类页面
   void _navigateToCategory() async {
     final result = await Navigator.push(
-      context, 
+      context,
       MaterialPageRoute(builder: (context) => CategoryScreen()),
     );
     if (result != null) {
@@ -166,7 +159,7 @@ class _HomeScreenState extends State<HomeScreen> {
   // 导航到设置页面
   void _navigateToSettings() async {
     await Navigator.push(
-      context, 
+      context,
       MaterialPageRoute(builder: (context) => SettingsScreen()),
     );
     // 从设置页面返回时重新加载笔记，确保导入的笔记可见
@@ -201,7 +194,9 @@ class _HomeScreenState extends State<HomeScreen> {
   // 切换时间轴排序方式
   void _toggleTimelineSortBy() {
     setState(() {
-      _timelineSortBy = _timelineSortBy == 'updatedAt' ? 'createdAt' : 'updatedAt';
+      _timelineSortBy = _timelineSortBy == 'updatedAt'
+          ? 'createdAt'
+          : 'updatedAt';
       _sortNotesByTimeline();
     });
   }
@@ -285,7 +280,10 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 8.0,
+                  vertical: 4.0,
+                ),
                 child: Wrap(
                   spacing: 8.0,
                   runSpacing: 4.0,
@@ -329,7 +327,10 @@ class _HomeScreenState extends State<HomeScreen> {
           // 时间轴排序方式切换（仅时间轴模式显示）
           if (_isTimelineMode)
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
+              padding: const EdgeInsets.symmetric(
+                horizontal: 8.0,
+                vertical: 4.0,
+              ),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
@@ -348,23 +349,29 @@ class _HomeScreenState extends State<HomeScreen> {
             child: _isLoading
                 ? Center(child: CircularProgressIndicator())
                 : _filteredNotes.isEmpty
-                    ? Center(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(Icons.note_add, size: 64, color: Colors.grey),
-                            SizedBox(height: 16),
-                            Text('暂无笔记', style: TextStyle(fontSize: 18, color: Colors.grey)),
-                            SizedBox(height: 8),
-                            Text('点击右下角按钮创建新笔记', style: TextStyle(color: Colors.grey)),
-                          ],
+                ? Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.note_add, size: 64, color: Colors.grey),
+                        SizedBox(height: 16),
+                        Text(
+                          '暂无笔记',
+                          style: TextStyle(fontSize: 18, color: Colors.grey),
                         ),
-                      )
-                    : appConfig.timelineMode && _isTimelineMode
-                        ? _buildTimelineView()
-                        : appConfig.viewMode == 'grid'
-                            ? _buildGridView()
-                            : _buildListView(),
+                        SizedBox(height: 8),
+                        Text(
+                          '点击右下角按钮创建新笔记',
+                          style: TextStyle(color: Colors.grey),
+                        ),
+                      ],
+                    ),
+                  )
+                : appConfig.timelineMode && _isTimelineMode
+                ? _buildTimelineView()
+                : appConfig.viewMode == 'grid'
+                ? _buildGridView()
+                : _buildListView(),
           ),
         ],
       );
@@ -372,102 +379,108 @@ class _HomeScreenState extends State<HomeScreen> {
 
     // 显示底部导航栏
     List<BottomNavigationBarItem> items = [];
-    
+
     // 添加主页
-    items.add(BottomNavigationBarItem(
-      icon: Icon(Icons.home),
-      label: '主页',
-    ));
-    
+    items.add(BottomNavigationBarItem(icon: Icon(Icons.home), label: '主页'));
+
     // 如果待办事项功能开启，添加待办事项
     if (appConfig.todoMode) {
-      items.add(BottomNavigationBarItem(
-        icon: Icon(Icons.checklist),
-        label: '待办事项',
-      ));
+      items.add(
+        BottomNavigationBarItem(icon: Icon(Icons.checklist), label: '待办事项'),
+      );
     }
-    
+
     // 如果数据分析功能开启，添加分析
     if (appConfig.analyticsMode) {
-      items.add(BottomNavigationBarItem(
-        icon: Icon(Icons.analytics),
-        label: '分析',
-      ));
+      items.add(
+        BottomNavigationBarItem(icon: Icon(Icons.analytics), label: '分析'),
+      );
     }
-    
 
-    
     // 检查是否需要显示底部导航栏
     bool shouldShowBottomNav = appConfig.todoMode || appConfig.analyticsMode;
-    
+
     // 如果需要显示底部导航栏
     if (shouldShowBottomNav) {
       return Scaffold(
         appBar: AppBar(
-          title: _currentIndex == 0 ? Text('Notemind') : 
-                 (appConfig.todoMode && _currentIndex == 1) ? Text('待办事项') : 
-                 (appConfig.analyticsMode && _currentIndex == 2) ? Text('数据分析') : 
-                 Text('Notemind'),
-            actions: [
-              if (_currentIndex == 0) ...[
-                if (!_isTimelineMode)
-                  IconButton(
-                    icon: Icon(appConfig.viewMode == 'grid' ? Icons.view_list : Icons.grid_view),
-                    onPressed: _toggleViewMode,
-                  ),
-                if (!_isTimelineMode)
-                  IconButton(
-                    icon: Icon(Icons.sort),
-                    onPressed: _toggleSortBy,
-                  ),
-                if (!_isTimelineMode && appConfig.timelineMode)
-                  IconButton(
-                    icon: Icon(Icons.timeline),
-                    onPressed: _toggleTimelineMode,
-                  ),
-                // 添加回收站入口到右上角
+          title: _currentIndex == 0
+              ? Text('Notemind')
+              : (appConfig.todoMode && _currentIndex == 1)
+              ? Text('待办事项')
+              : (appConfig.analyticsMode && _currentIndex == 2)
+              ? Text('数据分析')
+              : Text('Notemind'),
+          actions: [
+            if (_currentIndex == 0) ...[
+              if (!_isTimelineMode)
                 IconButton(
-                  icon: Icon(Icons.delete_sweep),
-                  onPressed: () async {
-                    final result = await Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (context) => RecycledNotesScreen()),
-                    );
-                    // 如果返回true，说明有笔记被恢复，需要刷新笔记列表
-                    if (result == true) {
-                      await _loadNotes();
-                    }
-                  },
+                  icon: Icon(
+                    appConfig.viewMode == 'grid'
+                        ? Icons.view_list
+                        : Icons.grid_view,
+                  ),
+                  onPressed: _toggleViewMode,
                 ),
+              if (!_isTimelineMode)
+                IconButton(icon: Icon(Icons.sort), onPressed: _toggleSortBy),
+              if (!_isTimelineMode && appConfig.timelineMode)
                 IconButton(
-                  icon: Icon(Icons.settings),
-                  onPressed: _navigateToSettings,
+                  icon: Icon(Icons.timeline),
+                  onPressed: _toggleTimelineMode,
                 ),
-              ],
+              // 添加回收站入口到右上角
+              IconButton(
+                icon: Icon(Icons.delete_sweep),
+                onPressed: () async {
+                  final result = await Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => RecycledNotesScreen(),
+                    ),
+                  );
+                  // 如果返回true，说明有笔记被恢复，需要刷新笔记列表
+                  if (result == true) {
+                    await _loadNotes();
+                  }
+                },
+              ),
+              IconButton(
+                icon: Icon(Icons.settings),
+                onPressed: _navigateToSettings,
+              ),
             ],
-          ),
-          body: _currentIndex == 0 ? _buildHomeContent() : 
-                 // 动态判断当前索引对应的功能
-                 (_currentIndex == 1 && appConfig.todoMode) ? TodoScreen() : 
-                 (_currentIndex == 1 && appConfig.analyticsMode && !appConfig.todoMode) ? AnalyticsScreen() : 
-                 (_currentIndex == 2 && appConfig.analyticsMode) ? AnalyticsScreen() : 
-                 _buildHomeContent(),
-          bottomNavigationBar: BottomNavigationBar(
-            currentIndex: _currentIndex,
-            onTap: (index) {
-              setState(() {
-                _currentIndex = index;
-              });
-            },
-            items: items,
-          ),
-          floatingActionButton: _currentIndex == 0
-              ? FloatingActionButton(
-                  onPressed: () => _navigateToEdit(),
-                  child: Icon(Icons.add),
-                )
-              : null,
-        );
+          ],
+        ),
+        body: _currentIndex == 0
+            ? _buildHomeContent()
+            :
+              // 动态判断当前索引对应的功能
+              (_currentIndex == 1 && appConfig.todoMode)
+            ? TodoScreen()
+            : (_currentIndex == 1 &&
+                  appConfig.analyticsMode &&
+                  !appConfig.todoMode)
+            ? AnalyticsScreen()
+            : (_currentIndex == 2 && appConfig.analyticsMode)
+            ? AnalyticsScreen()
+            : _buildHomeContent(),
+        bottomNavigationBar: BottomNavigationBar(
+          currentIndex: _currentIndex,
+          onTap: (index) {
+            setState(() {
+              _currentIndex = index;
+            });
+          },
+          items: items,
+        ),
+        floatingActionButton: _currentIndex == 0
+            ? FloatingActionButton(
+                onPressed: () => _navigateToEdit(),
+                child: Icon(Icons.add),
+              )
+            : null,
+      );
     } else {
       // 如果不需要显示底部导航栏，只显示笔记页面
       return Scaffold(
@@ -476,14 +489,15 @@ class _HomeScreenState extends State<HomeScreen> {
           actions: [
             if (!_isTimelineMode)
               IconButton(
-                icon: Icon(appConfig.viewMode == 'grid' ? Icons.view_list : Icons.grid_view),
+                icon: Icon(
+                  appConfig.viewMode == 'grid'
+                      ? Icons.view_list
+                      : Icons.grid_view,
+                ),
                 onPressed: _toggleViewMode,
               ),
             if (!_isTimelineMode)
-              IconButton(
-                icon: Icon(Icons.sort),
-                onPressed: _toggleSortBy,
-              ),
+              IconButton(icon: Icon(Icons.sort), onPressed: _toggleSortBy),
             if (!_isTimelineMode && appConfig.timelineMode)
               IconButton(
                 icon: Icon(Icons.timeline),
@@ -495,7 +509,9 @@ class _HomeScreenState extends State<HomeScreen> {
               onPressed: () async {
                 final result = await Navigator.push(
                   context,
-                  MaterialPageRoute(builder: (context) => RecycledNotesScreen()),
+                  MaterialPageRoute(
+                    builder: (context) => RecycledNotesScreen(),
+                  ),
                 );
                 // 如果返回true，说明有笔记被恢复，需要刷新笔记列表
                 if (result == true) {
@@ -581,9 +597,13 @@ class _HomeScreenState extends State<HomeScreen> {
       itemCount: _filteredNotes.length,
       itemBuilder: (context, index) {
         final note = _filteredNotes[index];
-        final dateTime = _timelineSortBy == 'createdAt' ? note.createdAt : note.updatedAt;
-        final formattedDate = '${dateTime.year}-${dateTime.month.toString().padLeft(2, '0')}-${dateTime.day.toString().padLeft(2, '0')}';
-        final formattedTime = '${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}';
+        final dateTime = _timelineSortBy == 'createdAt'
+            ? note.createdAt
+            : note.updatedAt;
+        final formattedDate =
+            '${dateTime.year}-${dateTime.month.toString().padLeft(2, '0')}-${dateTime.day.toString().padLeft(2, '0')}';
+        final formattedTime =
+            '${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}';
 
         return Container(
           padding: EdgeInsets.symmetric(vertical: 8.0),
@@ -607,11 +627,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                     // 时间线
                     if (index < _filteredNotes.length - 1)
-                      Container(
-                        width: 2,
-                        height: 80,
-                        color: Colors.grey[300],
-                      ),
+                      Container(width: 2, height: 80, color: Colors.grey[300]),
                     // 时间
                     Padding(
                       padding: const EdgeInsets.only(top: 8.0),
@@ -619,17 +635,11 @@ class _HomeScreenState extends State<HomeScreen> {
                         children: [
                           Text(
                             formattedDate,
-                            style: TextStyle(
-                              fontSize: 10,
-                              color: Colors.grey,
-                            ),
+                            style: TextStyle(fontSize: 10, color: Colors.grey),
                           ),
                           Text(
                             formattedTime,
-                            style: TextStyle(
-                              fontSize: 10,
-                              color: Colors.grey,
-                            ),
+                            style: TextStyle(fontSize: 10, color: Colors.grey),
                           ),
                         ],
                       ),
@@ -637,24 +647,23 @@ class _HomeScreenState extends State<HomeScreen> {
                   ],
                 ),
               ),
-              
+
               // 右侧笔记内容
               Expanded(
-                child:
-                  NoteItem(
-                    note: note,
-                    onTap: () => _navigateToDetail(note),
-                    onEdit: () => _navigateToEdit(note),
-                    onDelete: () async {
-                          await HiveService.deleteNoteToRecycled(note);
-                          await _loadNotes();
-                        },
-                    onPin: () {
-                      note.isPinned = !note.isPinned;
-                      HiveService.updateNote(note);
-                      _loadNotes();
-                    },
-                  ),
+                child: NoteItem(
+                  note: note,
+                  onTap: () => _navigateToDetail(note),
+                  onEdit: () => _navigateToEdit(note),
+                  onDelete: () async {
+                    await HiveService.deleteNoteToRecycled(note);
+                    await _loadNotes();
+                  },
+                  onPin: () {
+                    note.isPinned = !note.isPinned;
+                    HiveService.updateNote(note);
+                    _loadNotes();
+                  },
+                ),
               ),
             ],
           ),

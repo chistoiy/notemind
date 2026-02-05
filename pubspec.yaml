@@ -51,11 +51,9 @@ dependencies:
   
   # 工具依赖
   shared_preferences: ^2.2.3
-  url_launcher: ^6.3.0
   
   # 其他依赖
   flutter_slidable: ^3.1.0
-  pull_to_refresh: ^2.0.0
   uuid: ^3.0.7
   
   
